@@ -1,0 +1,30 @@
+{
+  "name": "raycast-mcp-server",
+  "version": "1.0.0",
+  "description": "Model Context Protocol server for Raycast workflow automation",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.9.2"
+  },
+  "keywords": [
+    "mcp",
+    "raycast",
+    "workflow",
+    "automation",
+    "macos"
+  ],
+  "author": "Claude Code",
+  "license": "MIT"
+}

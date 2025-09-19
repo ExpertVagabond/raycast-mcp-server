@@ -1,0 +1,55 @@
+name: raycast-mcp-server
+description: Model Context Protocol server for Raycast workflow automation
+author: Claude Code
+license: MIT
+version: 1.0.0
+
+# TypeScript/Node.js configuration
+runtime: typescript
+entry: src/index.ts
+transport: stdio
+
+# Build configuration
+build:
+  command: npm run build
+  output: dist/index.js
+
+# Dependencies
+dependencies:
+  - "@modelcontextprotocol/sdk"
+  - "zod"
+
+# Development dependencies
+devDependencies:
+  - "@types/node"
+  - "typescript"
+
+# Environment variables
+env:
+  RAYCAST_API_KEY: ${RAYCAST_API_KEY}
+  RAYCAST_TEAM_ID: ${RAYCAST_TEAM_ID}
+
+# Tags for discovery
+tags:
+  - raycast
+  - workflow
+  - automation
+  - macos
+  - productivity
+
+# Tools provided by this server
+tools:
+  - name: raycast_auth
+    description: Manage Raycast and service authentication
+  - name: raycast_extensions
+    description: Manage Raycast extensions and store integration  
+  - name: raycast_workflows
+    description: Create and manage Raycast workflows and automations
+  - name: raycast_snippets
+    description: Manage Raycast snippets and text expansion
+  - name: raycast_quicklinks
+    description: Manage Raycast quicklinks and shortcuts
+  - name: raycast_scripts
+    description: Execute and manage Raycast scripts
+  - name: raycast_preferences
+    description: Manage Raycast preferences and settings
