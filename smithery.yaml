@@ -15,12 +15,12 @@ startCommand:
       raycastTeamId:
         type: string
         description: Your Raycast team ID (optional)
-    commandFunction: |
-      (config) => ({ 
-        command: 'node', 
-        args: ['./dist/index.js'], 
-        env: { 
-          RAYCAST_API_KEY: config.raycastApiKey,
-          RAYCAST_TEAM_ID: config.raycastTeamId 
-        } 
-      })
+  commandFunction: |
+    (config) => ({ 
+      command: 'node', 
+      args: ['./dist/index.js'], 
+      env: { 
+        RAYCAST_API_KEY: config.raycastApiKey,
+        RAYCAST_TEAM_ID: config.raycastTeamId 
+      } 
+    })
