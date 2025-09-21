@@ -1,10 +1,7 @@
 name: raycast-mcp-server
 description: Model Context Protocol server for Raycast workflow automation
-author: Claude Code
-license: MIT
 version: 1.0.0
 
-# Build configuration
 build:
   type: docker
   dockerfile: Dockerfile
@@ -21,65 +18,43 @@ startCommand:
       };
     }
 
-# Capabilities
 capabilities:
-  tools: 7
-  transport: ["stdio"]
-
-# Categories
-categories:
-  - automation
-  - productivity
-  - macos
-
-# Keywords
-keywords:
-  - raycast
-  - workflow
-  - automation
-  - macos
-  - productivity
-
-# Environment
-environment:
-  node: ">=18.0.0"
-
-# Dependencies
-dependencies:
-  - "@modelcontextprotocol/sdk"
-  - "zod"
-
-# Development dependencies
-devDependencies:
-  - "@types/node"
-  - "typescript"
-
-# Environment variables
-env:
-  RAYCAST_API_KEY: ${RAYCAST_API_KEY}
-  RAYCAST_TEAM_ID: ${RAYCAST_TEAM_ID}
-
-# Tags for discovery
-tags:
-  - raycast
-  - workflow
-  - automation
-  - macos
-  - productivity
-
-# Tools provided by this server
-tools:
-  - name: raycast_auth
-    description: Manage Raycast and service authentication
-  - name: raycast_extensions
-    description: Manage Raycast extensions and store integration  
-  - name: raycast_workflows
-    description: Create and manage Raycast workflows and automations
-  - name: raycast_snippets
-    description: Manage Raycast snippets and text expansion
-  - name: raycast_quicklinks
-    description: Manage Raycast quicklinks and shortcuts
-  - name: raycast_scripts
-    description: Execute and manage Raycast scripts
-  - name: raycast_preferences
-    description: Manage Raycast preferences and settings
+  tools:
+    - name: raycast_auth
+      description: Manage Raycast and service authentication
+      parameters:
+        service: string?
+        
+    - name: raycast_extensions
+      description: Manage Raycast extensions and store integration
+      parameters:
+        action: string
+        
+    - name: raycast_workflows
+      description: Create and manage Raycast workflows and automations
+      parameters:
+        name: string
+        steps: array?
+        
+    - name: raycast_snippets
+      description: Manage Raycast snippets and text expansion
+      parameters:
+        keyword: string
+        text: string?
+        
+    - name: raycast_quicklinks
+      description: Manage Raycast quicklinks and shortcuts
+      parameters:
+        url: string
+        name: string?
+        
+    - name: raycast_scripts
+      description: Execute and manage Raycast scripts
+      parameters:
+        script: string
+        
+    - name: raycast_preferences
+      description: Manage Raycast preferences and settings
+      parameters:
+        setting: string
+        value: string?
