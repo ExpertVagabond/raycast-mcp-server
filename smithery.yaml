@@ -4,15 +4,45 @@ author: Claude Code
 license: MIT
 version: 1.0.0
 
-# TypeScript/Node.js configuration
-runtime: typescript
-entry: src/index.ts
-transport: stdio
-
 # Build configuration
 build:
-  command: npm run build
-  output: dist/index.js
+  type: docker
+  dockerfile: Dockerfile
+
+startCommand:
+  type: stdio
+  configSchema: {}
+  commandFunction: |
+    (config) => {
+      return {
+        command: "node",
+        args: ["dist/index.js"],
+        env: {}
+      };
+    }
+
+# Capabilities
+capabilities:
+  tools: 7
+  transport: ["stdio"]
+
+# Categories
+categories:
+  - automation
+  - productivity
+  - macos
+
+# Keywords
+keywords:
+  - raycast
+  - workflow
+  - automation
+  - macos
+  - productivity
+
+# Environment
+environment:
+  node: ">=18.0.0"
 
 # Dependencies
 dependencies:
