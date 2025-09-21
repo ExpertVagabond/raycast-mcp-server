@@ -13,8 +13,6 @@ import { handleToolCall } from './handlers.js';
 import { raycastAuth, AuthConfig } from './auth.js';
 import { promisify } from 'util';
 import { exec } from 'child_process';
-import { fileURLToPath } from 'url';
-import path from 'path';
 
 class RaycastMCPServer {
   private server: Server;
@@ -494,10 +492,21 @@ class RaycastMCPServer {
 }
 
 // Start the server if this file is run directly  
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Use CommonJS-compatible detection for both ES modules and CommonJS
+const isMainModule = (() => {
+  try {
+    // Try ES module detection first
+    if (import.meta.url) {
+      return import.meta.url === `file://${process.argv[1]}`;
+    }
+  } catch {
+    // Fall back to CommonJS detection
+    return require.main === module;
+  }
+  return false;
+})();
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule) {
   const server = new RaycastMCPServer();
   server.start().catch((error) => {
     console.error('❌ Failed to start Raycast MCP server:', error);
