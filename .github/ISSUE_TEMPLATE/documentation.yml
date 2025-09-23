@@ -1,0 +1,28 @@
+name: Documentation
+description: Report an issue with documentation
+title: "[DOCS] "
+labels: ["documentation", "triage"]
+assignees: ["ExpertVagabond"]
+
+body:
+  - type: textarea
+    id: doc-issue
+    attributes:
+      label: Documentation Issue
+      description: What's wrong with the documentation?
+    validations:
+      required: true
+
+  - type: input
+    id: doc-location
+    attributes:
+      label: Location
+      description: Where is this documentation located? (URL or file path)
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggested-fix
+    attributes:
+      label: Suggested Fix
+      description: How should this be fixed or improved?
