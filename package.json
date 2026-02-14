@@ -1,10 +1,17 @@
 {
   "name": "raycast-mcp-server",
-  "version": "1.0.0",
+  "mcpName": "io.github.ExpertVagabond/raycast",
+  "version": "1.0.1",
   "description": "Model Context Protocol server for Raycast workflow automation",
   "type": "module",
   "main": "dist/index.js",
   "module": "./src/index.ts",
+  "bin": {
+    "raycast-mcp-server": "dist/index.js"
+  },
+  "files": [
+    "dist/index.js"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -26,5 +33,10 @@
     "macos"
   ],
   "author": "Claude Code",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ExpertVagabond/raycast-mcp-server.git"
+  },
+  "homepage": "https://github.com/ExpertVagabond/raycast-mcp-server#readme"
 }
