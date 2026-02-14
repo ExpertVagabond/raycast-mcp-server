@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema, InitializeRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
 import { tools } from './tools.js';
 import { handleToolCall } from './handlers.js';
 import { raycastAuth } from './auth.js';
@@ -23,6 +23,17 @@ class RaycastMCPServer {
         this.setupHandlers();
     }
     setupHandlers() {
+        // Initialize handler - REQUIRED for MCP protocol
+        this.server.setRequestHandler(InitializeRequestSchema, async (request) => ({
+            protocolVersion: "2024-11-05",
+            capabilities: {
+                tools: {},
+            },
+            serverInfo: {
+                name: "raycast-mcp-server",
+                version: "1.0.0",
+            },
+        }));
         this.server.setRequestHandler(ListToolsRequestSchema, async () => {
             // Add authentication tools dynamically
             const authTools = [
@@ -434,8 +445,22 @@ class RaycastMCPServer {
         console.error('⚡ Raycast MCP Server started with full authentication and workflow support');
     }
 }
-// Start the server if this file is run directly
-if (process.argv[1] && process.argv[1].endsWith('index.js')) {
+// Start the server if this file is run directly  
+// Use CommonJS-compatible detection for both ES modules and CommonJS
+const isMainModule = (() => {
+    try {
+        // Try ES module detection first
+        if (import.meta.url) {
+            return import.meta.url === `file://${process.argv[1]}`;
+        }
+    }
+    catch {
+        // Fall back to CommonJS detection
+        return require.main === module;
+    }
+    return false;
+})();
+if (isMainModule) {
     const server = new RaycastMCPServer();
     server.start().catch((error) => {
         console.error('❌ Failed to start Raycast MCP server:', error);
