@@ -1,0 +1,14 @@
+[package]
+name = "raycast-mcp-server"
+version = "0.1.0"
+edition = "2024"
+description = "MCP server for Raycast automation on macOS -- 9 tools for search, commands, clipboard, shortcuts, window control, system functions, auth, extensions, workflows"
+license = "MIT"
+authors = ["Purple Squirrel Media LLC"]
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
