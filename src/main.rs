@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::BufRead;
 use std::process::Command;
 use tracing::info;
@@ -161,7 +161,11 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             let script = format!(
                 "tell application \"Raycast\" to activate\ndelay 0.5\ntell application \"System Events\" to keystroke \"{}\"{}",
                 query.replace('"', "\\\""),
-                if execute { "\ndelay 0.5\ntell application \"System Events\" to key code 36" } else { "" }
+                if execute {
+                    "\ndelay 0.5\ntell application \"System Events\" to key code 36"
+                } else {
+                    ""
+                }
             );
             let _ = run_osascript(&script);
             Ok(json!({"action": "search", "query": query, "executed": execute}))
@@ -181,11 +185,13 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
                     "reminders" => "extensions/raycast/apple-reminders/create-reminder",
                     "notes" => "extensions/raycast/apple-notes/search-notes",
                     "safari-bookmarks" => "extensions/raycast/safari/search-bookmarks",
-                    other => return {
-                        let url = format!("raycast://extensions/{other}");
-                        open_url(&url)?;
-                        Ok(json!({"action": "open", "command": other}))
-                    },
+                    other => {
+                        return {
+                            let url = format!("raycast://extensions/{other}");
+                            open_url(&url)?;
+                            Ok(json!({"action": "open", "command": other}))
+                        };
+                    }
                 };
                 let mut url = format!("raycast://{mapped}");
                 if let Some(a) = cmd_args {
@@ -217,7 +223,10 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
                     run_cmd("pbcopy", &[]).map_err(|_| "pbcopy failed".to_string())?;
                     // Use a pipe approach
                     let output = Command::new("sh")
-                        .args(["-c", &format!("printf '%s' '{}' | pbcopy", text.replace('\'', "'\\''"))])
+                        .args([
+                            "-c",
+                            &format!("printf '%s' '{}' | pbcopy", text.replace('\'', "'\\''")),
+                        ])
                         .output()
                         .map_err(|e| format!("copy failed: {e}"))?;
                     if !output.status.success() {
@@ -226,12 +235,19 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
                 }
                 "paste" => {
                     if let Some(idx) = args["index"].as_u64() {
-                        open_url("raycast://extensions/raycast/clipboard-history/clipboard-history")?;
-                        let script = format!("tell application \"System Events\" to key code 125 repeat {} times", idx);
+                        open_url(
+                            "raycast://extensions/raycast/clipboard-history/clipboard-history",
+                        )?;
+                        let script = format!(
+                            "tell application \"System Events\" to key code 125 repeat {} times",
+                            idx
+                        );
                         run_osascript(&script)?;
                         run_osascript("tell application \"System Events\" to key code 36")?;
                     } else {
-                        run_osascript("tell application \"System Events\" to keystroke \"v\" using command down")?;
+                        run_osascript(
+                            "tell application \"System Events\" to keystroke \"v\" using command down",
+                        )?;
                     }
                 }
                 _ => return Err(format!("Unknown clipboard action: {action}")),
@@ -245,11 +261,14 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             if let Some(key) = custom_key {
                 let parts: Vec<&str> = key.split('+').map(|s| s.trim()).collect();
                 let mods = ["cmd", "shift", "alt", "ctrl"];
-                let modifiers: Vec<&str> = parts.iter().filter(|k| mods.contains(k)).copied().collect();
+                let modifiers: Vec<&str> =
+                    parts.iter().filter(|k| mods.contains(k)).copied().collect();
                 let key_char = parts.iter().find(|k| !mods.contains(k)).unwrap_or(&"");
                 let mut mod_str = String::new();
                 for m in &modifiers {
-                    if !mod_str.is_empty() { mod_str.push_str(", "); }
+                    if !mod_str.is_empty() {
+                        mod_str.push_str(", ");
+                    }
                     match *m {
                         "cmd" => mod_str.push_str("command down"),
                         "shift" => mod_str.push_str("shift down"),
@@ -258,13 +277,18 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
                         _ => {}
                     }
                 }
-                let script = format!("tell application \"System Events\" to keystroke \"{}\" using {{{mod_str}}}", key_char);
+                let script = format!(
+                    "tell application \"System Events\" to keystroke \"{}\" using {{{mod_str}}}",
+                    key_char
+                );
                 run_osascript(&script)?;
                 Ok(json!({"action": "shortcut", "key": key}))
             } else if let Some(sc) = shortcut {
                 let url = match sc {
                     "main-window" => "raycast://",
-                    "clipboard-history" => "raycast://extensions/raycast/clipboard-history/clipboard-history",
+                    "clipboard-history" => {
+                        "raycast://extensions/raycast/clipboard-history/clipboard-history"
+                    }
                     "emoji" => "raycast://extensions/raycast/emoji-symbols/emoji-symbols",
                     "calculator" => "raycast://extensions/raycast/calculator/calculator",
                     "screenshot" => "raycast://extensions/raycast/screenshot/screenshot",
@@ -282,7 +306,9 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             let script = match action {
                 "show" | "focus" => "tell application \"Raycast\" to activate",
                 "hide" => "tell application \"Raycast\" to set visible to false",
-                "toggle" => "if application \"Raycast\" is running then\ntell application \"Raycast\" to activate\nend if",
+                "toggle" => {
+                    "if application \"Raycast\" is running then\ntell application \"Raycast\" to activate\nend if"
+                }
                 _ => return Err(format!("Unknown window action: {action}")),
             };
             run_osascript(script)?;
@@ -304,7 +330,9 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
 
             let cmd = match func {
                 "sleep" => "pmset sleepnow",
-                "lock" => "/System/Library/CoreServices/Menu\\ Extras/User.menu/Contents/Resources/CGSession -suspend",
+                "lock" => {
+                    "/System/Library/CoreServices/Menu\\ Extras/User.menu/Contents/Resources/CGSession -suspend"
+                }
                 "logout" => "osascript -e 'tell application \"System Events\" to log out'",
                 "empty-trash" => "osascript -e 'tell application \"Finder\" to empty the trash'",
                 "eject-all" => "osascript -e 'tell application \"Finder\" to eject the disks'",
@@ -312,7 +340,10 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
                 "shutdown" => "sudo shutdown -h now",
                 _ => return Err(format!("Unknown system function: {func}")),
             };
-            let output = Command::new("sh").args(["-c", cmd]).output().map_err(|e| format!("{e}"))?;
+            let output = Command::new("sh")
+                .args(["-c", cmd])
+                .output()
+                .map_err(|e| format!("{e}"))?;
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 return Err(format!("System command failed: {stderr}"));
@@ -326,11 +357,21 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
                 "setup" => {
                     let svc = service.ok_or("service required for setup")?;
                     let instructions = match svc {
-                        "raycast" => "Raycast API Setup:\n1. Open Raycast > Preferences > Extensions > Developer\n2. Create new API key\n3. export RAYCAST_API_KEY=\"your-key\"",
-                        "github" => "GitHub Token Setup:\n1. GitHub Settings > Developer settings > Personal access tokens\n2. Generate token with repo,user scopes\n3. export GITHUB_TOKEN=\"your-token\"",
-                        "notion" => "Notion Setup:\n1. notion.so/my-integrations > Create integration\n2. Copy Internal Integration Token\n3. export NOTION_TOKEN=\"your-token\"",
-                        "figma" => "Figma Setup:\n1. Figma Settings > Personal access tokens\n2. Generate token\n3. export FIGMA_TOKEN=\"your-token\"",
-                        "slack" => "Slack Setup:\n1. api.slack.com/apps > Create app\n2. Configure OAuth scopes\n3. export SLACK_TOKEN=\"your-bot-token\"",
+                        "raycast" => {
+                            "Raycast API Setup:\n1. Open Raycast > Preferences > Extensions > Developer\n2. Create new API key\n3. export RAYCAST_API_KEY=\"your-key\""
+                        }
+                        "github" => {
+                            "GitHub Token Setup:\n1. GitHub Settings > Developer settings > Personal access tokens\n2. Generate token with repo,user scopes\n3. export GITHUB_TOKEN=\"your-token\""
+                        }
+                        "notion" => {
+                            "Notion Setup:\n1. notion.so/my-integrations > Create integration\n2. Copy Internal Integration Token\n3. export NOTION_TOKEN=\"your-token\""
+                        }
+                        "figma" => {
+                            "Figma Setup:\n1. Figma Settings > Personal access tokens\n2. Generate token\n3. export FIGMA_TOKEN=\"your-token\""
+                        }
+                        "slack" => {
+                            "Slack Setup:\n1. api.slack.com/apps > Create app\n2. Configure OAuth scopes\n3. export SLACK_TOKEN=\"your-bot-token\""
+                        }
                         _ => "Setup instructions not available for this service",
                     };
                     Ok(json!({"action": "setup", "service": svc, "instructions": instructions}))
@@ -351,8 +392,18 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
                     Ok(json!({"service": svc, "configured": configured, "envVar": env_var}))
                 }
                 "audit" => {
-                    let services = ["RAYCAST_API_KEY", "GITHUB_TOKEN", "NOTION_TOKEN", "FIGMA_TOKEN", "SLACK_TOKEN", "LINEAR_TOKEN", "JIRA_TOKEN"];
-                    let names = ["raycast", "github", "notion", "figma", "slack", "linear", "jira"];
+                    let services = [
+                        "RAYCAST_API_KEY",
+                        "GITHUB_TOKEN",
+                        "NOTION_TOKEN",
+                        "FIGMA_TOKEN",
+                        "SLACK_TOKEN",
+                        "LINEAR_TOKEN",
+                        "JIRA_TOKEN",
+                    ];
+                    let names = [
+                        "raycast", "github", "notion", "figma", "slack", "linear", "jira",
+                    ];
                     let report: Vec<Value> = services.iter().zip(names.iter()).map(|(var, name)| {
                         json!({"service": name, "configured": std::env::var(var).is_ok()})
                     }).collect();
@@ -360,7 +411,9 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
                 }
                 "oauth" => {
                     let svc = service.ok_or("service required")?;
-                    Ok(json!({"action": "oauth", "service": svc, "info": "OAuth flow must be completed in browser. Set the resulting token in the appropriate environment variable."}))
+                    Ok(
+                        json!({"action": "oauth", "service": svc, "info": "OAuth flow must be completed in browser. Set the resulting token in the appropriate environment variable."}),
+                    )
                 }
                 _ => Err(format!("Unknown auth action: {action}")),
             }
@@ -369,7 +422,8 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             let action = args["action"].as_str().ok_or("action required")?;
             match action {
                 "list" => {
-                    let result = run_cmd("defaults", &["read", "com.raycast.macos", "extensions"]).unwrap_or_else(|_| "No extensions configuration found".to_string());
+                    let result = run_cmd("defaults", &["read", "com.raycast.macos", "extensions"])
+                        .unwrap_or_else(|_| "No extensions configuration found".to_string());
                     Ok(json!({"extensions": result.trim()}))
                 }
                 "search" => {
@@ -379,7 +433,9 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
                     Ok(json!({"action": "search", "query": query}))
                 }
                 "install" => {
-                    let ext_id = args["extension_id"].as_str().ok_or("extension_id required")?;
+                    let ext_id = args["extension_id"]
+                        .as_str()
+                        .ok_or("extension_id required")?;
                     let url = format!("raycast://extensions/store/{ext_id}");
                     open_url(&url)?;
                     Ok(json!({"action": "install", "extension_id": ext_id}))
@@ -397,11 +453,13 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
                 "create" => {
                     let wf_name = args["name"].as_str().ok_or("name required")?;
                     let trigger = args["trigger"].as_str().unwrap_or("manual");
-                    Ok(json!({"action": "create", "name": wf_name, "trigger": trigger, "info": "Workflow created (in-memory)"}))
+                    Ok(
+                        json!({"action": "create", "name": wf_name, "trigger": trigger, "info": "Workflow created (in-memory)"}),
+                    )
                 }
-                "list" => {
-                    Ok(json!({"workflows": ["system-sleep", "empty-trash", "github-status"], "info": "Predefined workflows available"}))
-                }
+                "list" => Ok(
+                    json!({"workflows": ["system-sleep", "empty-trash", "github-status"], "info": "Predefined workflows available"}),
+                ),
                 "execute" => {
                     let wf_name = args["name"].as_str().ok_or("name required")?;
                     match wf_name {
@@ -427,7 +485,9 @@ fn urlenc(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{:02X}", b)),
         }
     }
@@ -436,7 +496,10 @@ fn urlenc(s: &str) -> String {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt().with_env_filter("info").with_writer(std::io::stderr).init();
+    tracing_subscriber::fmt()
+        .with_env_filter("info")
+        .with_writer(std::io::stderr)
+        .init();
     info!("raycast-mcp-server starting on stdio");
 
     let stdin = std::io::stdin();
@@ -445,9 +508,13 @@ async fn main() {
     let mut line = String::new();
     loop {
         line.clear();
-        if stdin.lock().read_line(&mut line).unwrap_or(0) == 0 { break; }
+        if stdin.lock().read_line(&mut line).unwrap_or(0) == 0 {
+            break;
+        }
         let trimmed = line.trim();
-        if trimmed.is_empty() { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
 
         let req: JsonRpcRequest = match serde_json::from_str(trimmed) {
             Ok(r) => r,
