@@ -1,9 +1,8 @@
 import { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { executeRaycastCommand, openRaycast, triggerRaycastURL } from './tools.js';
-import { exec, execFile, spawn } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
 /**
@@ -129,11 +128,16 @@ async function handleRaycastSearch(args: any): Promise<CallToolResult> {
 }
 
 async function handleRaycastOpen(args: any): Promise<CallToolResult> {
-  const { command, extension, args: cmdArgs } = args;
-  
+  const command = args.command ? validateStringInput(args.command, 'command', 128) : undefined;
+  const extension = args.extension ? validateStringInput(args.extension, 'extension', 128) : undefined;
+  const cmdArgs = args.args ? validateStringInput(args.args, 'args', 512) : undefined;
+
+  // Validate format: only allow alphanumeric, hyphens, underscores, slashes, dots
+  const safeIdPattern = /^[a-zA-Z0-9\-_./]+$/;
+
   try {
     let raycastURL = 'raycast://';
-    
+
     if (command) {
       // Common Raycast commands
       const commandMap: { [key: string]: string } = {
@@ -146,14 +150,31 @@ async function handleRaycastOpen(args: any): Promise<CallToolResult> {
         'notes': 'extensions/raycast/apple-notes/search-notes',
         'safari-bookmarks': 'extensions/raycast/safari/search-bookmarks'
       };
-      
-      const mappedCommand = commandMap[command] || `extensions/${command}`;
-      raycastURL += mappedCommand;
-      
+
+      const mappedCommand = commandMap[command];
+      if (mappedCommand) {
+        raycastURL += mappedCommand;
+      } else {
+        // Validate unmapped commands to prevent URL injection
+        if (!safeIdPattern.test(command)) {
+          return {
+            content: [{ type: 'text', text: `Invalid command format: "${command}"` }],
+            isError: true
+          };
+        }
+        raycastURL += `extensions/${command}`;
+      }
+
       if (cmdArgs) {
         raycastURL += `?arguments=${encodeURIComponent(cmdArgs)}`;
       }
     } else if (extension) {
+      if (!safeIdPattern.test(extension)) {
+        return {
+          content: [{ type: 'text', text: `Invalid extension format: "${extension}"` }],
+          isError: true
+        };
+      }
       raycastURL += `extensions/${extension}`;
     } else {
       await openRaycast();
@@ -319,8 +340,8 @@ async function handleRaycastShortcut(args: any): Promise<CallToolResult> {
 }
 
 async function handleRaycastWindow(args: any): Promise<CallToolResult> {
-  const { action } = args;
-  
+  const action = validateStringInput(args.action, 'action', 32);
+
   try {
     const windowScript = (() => {
       switch (action) {
