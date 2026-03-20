@@ -251,32 +251,44 @@ class RaycastMCPServer {
         case 'search':
           if (!query) {
             return {
-              content: [{ type: 'text', text: '❌ Query parameter required for search' }],
+              content: [{ type: 'text', text: 'Query parameter required for search' }],
               isError: true
             };
           }
-          // Open Raycast Store with search
-          await execAsync(`open "raycast://extensions/store?search=${encodeURIComponent(query)}"`);
+          if (typeof query !== 'string' || query.length > 256) {
+            return {
+              content: [{ type: 'text', text: 'Query must be a string under 256 characters' }],
+              isError: true
+            };
+          }
+          // Open Raycast Store with search — use execFile to avoid shell injection
+          await (promisify(require('child_process').execFile))('open', [`raycast://extensions/store?search=${encodeURIComponent(query)}`]);
           return {
             content: [{
               type: 'text',
-              text: `🔍 Raycast Store Search: "${query}"\n\n✅ Store opened with search results`
+              text: `Raycast Store Search: "${query}"\n\nStore opened with search results`
             }]
           };
           
         case 'install':
           if (!extension_id) {
             return {
-              content: [{ type: 'text', text: '❌ Extension ID required for installation' }],
+              content: [{ type: 'text', text: 'Extension ID required for installation' }],
               isError: true
             };
           }
-          // Open extension in store for installation
-          await execAsync(`open "raycast://extensions/store/${extension_id}"`);
+          if (typeof extension_id !== 'string' || !/^[a-zA-Z0-9\-_\/]+$/.test(extension_id)) {
+            return {
+              content: [{ type: 'text', text: 'Invalid extension ID format' }],
+              isError: true
+            };
+          }
+          // Open extension in store for installation — use execFile
+          await (promisify(require('child_process').execFile))('open', [`raycast://extensions/store/${encodeURIComponent(extension_id)}`]);
           return {
             content: [{
               type: 'text',
-              text: `📥 Installing Extension: ${extension_id}\n\n✅ Extension page opened for installation`
+              text: `Installing Extension: ${extension_id}\n\nExtension page opened for installation`
             }]
           };
           
@@ -289,9 +301,16 @@ class RaycastMCPServer {
           }
           
           // Validate extension structure
+          if (typeof publish_path !== 'string' || publish_path.includes('..') || publish_path.length > 512) {
+            return {
+              content: [{ type: 'text', text: 'Invalid publish path' }],
+              isError: true
+            };
+          }
           const packageJsonPath = `${publish_path}/package.json`;
           try {
-            const packageJson = JSON.parse(await execAsync(`cat "${packageJsonPath}"`).then((r: any) => r.stdout));
+            const { readFileSync } = require('fs');
+            const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
             
             // Check for required Raycast extension fields
             const requiredFields = ['name', 'title', 'description', 'author', 'license'];

@@ -1,8 +1,9 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export interface RaycastTools {
   raycast_search: Tool;
@@ -137,28 +138,32 @@ export const tools: RaycastTools = {
   }
 };
 
-export async function executeRaycastCommand(command: string): Promise<{ stdout: string; stderr: string }> {
+export async function executeRaycastCommand(command: string, args: string[] = []): Promise<{ stdout: string; stderr: string }> {
   try {
-    const result = await execAsync(command, { timeout: 60000 }); // Increased timeout for AppleScript operations
-    return { stdout: result.stdout, stderr: result.stderr };
+    const result = await execFileAsync(command, args, { timeout: 60000 });
+    return { stdout: result.stdout as string, stderr: result.stderr as string };
   } catch (error: any) {
     if (error.code === 'ETIMEDOUT') {
-      return { 
-        stdout: '', 
-        stderr: `Raycast operation timed out. This may be normal for complex AppleScript operations. Operation was attempted but may need manual verification.` 
+      return {
+        stdout: '',
+        stderr: `Raycast operation timed out. Operation was attempted but may need manual verification.`
       };
     }
-    return { 
-      stdout: '', 
-      stderr: error.message || 'Raycast command execution failed' 
+    return {
+      stdout: '',
+      stderr: error.message || 'Raycast command execution failed'
     };
   }
 }
 
 export async function openRaycast(): Promise<void> {
-  await execAsync('open -a Raycast');
+  await execFileAsync('open', ['-a', 'Raycast']);
 }
 
 export async function triggerRaycastURL(url: string): Promise<void> {
-  await execAsync(`open "${url}"`);
+  // Validate URL scheme to prevent command injection
+  if (!url.startsWith('raycast://') && !url.startsWith('https://')) {
+    throw new Error(`Invalid URL scheme. Only raycast:// and https:// are allowed.`);
+  }
+  await execFileAsync('open', [url]);
 }
