@@ -1,7 +1,7 @@
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export interface AuthConfig {
   raycastApiKey?: string;
@@ -31,8 +31,18 @@ export class RaycastAuth {
     };
   }
 
+  // Validate service name against known set
+  private validateService(service: string): string {
+    const allowed = ['raycast', 'github', 'notion', 'figma', 'slack', 'linear', 'jira'];
+    if (typeof service !== 'string' || !allowed.includes(service)) {
+      throw new Error(`Invalid service: must be one of ${allowed.join(', ')}`);
+    }
+    return service;
+  }
+
   // OAuth flow for Raycast extensions
   async initiateOAuth(service: string): Promise<string> {
+    this.validateService(service);
     const oauthUrls: { [key: string]: string } = {
       github: 'https://github.com/login/oauth/authorize?client_id=YOUR_CLIENT_ID&scope=repo,user',
       notion: 'https://api.notion.com/v1/oauth/authorize?client_id=YOUR_CLIENT_ID&response_type=code',
@@ -47,14 +57,15 @@ export class RaycastAuth {
       throw new Error(`Unsupported OAuth service: ${service}`);
     }
 
-    // Open OAuth URL in browser
-    await execAsync(`open "${url}"`);
-    
+    // Open OAuth URL in browser — use execFile to avoid shell injection
+    await execFileAsync('open', [url]);
+
     return url;
   }
 
   // Check if credentials are configured
   hasCredentials(service: string): boolean {
+    this.validateService(service);
     const serviceMap: { [key: string]: keyof AuthConfig } = {
       raycast: 'raycastApiKey',
       github: 'githubToken',
@@ -71,6 +82,7 @@ export class RaycastAuth {
 
   // Get credential for service
   getCredential(service: string): string | undefined {
+    this.validateService(service);
     const serviceMap: { [key: string]: keyof AuthConfig } = {
       raycast: 'raycastApiKey',
       github: 'githubToken',
@@ -85,35 +97,48 @@ export class RaycastAuth {
     return key ? this.config[key] : undefined;
   }
 
-  // Validate API credentials
-  async validateCredentials(service: string): Promise<{ valid: boolean; user?: any; error?: string }> {
+  // Validate API credentials — returns only safe summary fields, never raw tokens or full API responses
+  async validateCredentials(service: string): Promise<{ valid: boolean; username?: string; error?: string }> {
+    this.validateService(service);
     const token = this.getCredential(service);
     if (!token) {
       return { valid: false, error: 'No credentials found' };
     }
 
     try {
-      const validators: { [key: string]: () => Promise<any> } = {
+      const validators: { [key: string]: () => Promise<{ valid: boolean; username: string }> } = {
         github: async () => {
           const response = await fetch('https://api.github.com/user', {
             headers: { Authorization: `token ${token}` }
           });
-          return response.json();
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const data = await response.json() as { login?: string };
+          return { valid: true, username: data.login ?? 'unknown' };
         },
         notion: async () => {
           const response = await fetch('https://api.notion.com/v1/users/me', {
-            headers: { 
+            headers: {
               Authorization: `Bearer ${token}`,
               'Notion-Version': '2022-06-28'
             }
           });
-          return response.json();
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const data = await response.json() as { name?: string };
+          return { valid: true, username: data.name ?? 'unknown' };
         },
         figma: async () => {
           const response = await fetch('https://api.figma.com/v1/me', {
             headers: { 'X-Figma-Token': token }
           });
-          return response.json();
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const data = await response.json() as { handle?: string };
+          return { valid: true, username: data.handle ?? 'unknown' };
         }
       };
 
@@ -122,8 +147,8 @@ export class RaycastAuth {
         return { valid: false, error: 'Validation not implemented for this service' };
       }
 
-      const user = await validator();
-      return { valid: true, user };
+      const result = await validator();
+      return { valid: result.valid, username: result.username };
     } catch (error: any) {
       return { valid: false, error: error.message };
     }

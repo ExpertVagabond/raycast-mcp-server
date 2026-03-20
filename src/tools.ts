@@ -1,8 +1,7 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
-import { exec, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
 export interface RaycastTools {

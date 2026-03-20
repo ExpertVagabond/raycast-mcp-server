@@ -1,10 +1,12 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::io::BufRead;
-use std::process::Command;
+use std::io::Write as IoWrite;
+use std::process::{Command, Stdio};
 use tracing::info;
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct JsonRpcRequest {
     jsonrpc: String,
     id: Option<Value>,
@@ -13,6 +15,7 @@ struct JsonRpcRequest {
     params: Value,
 }
 
+/// Run a command with explicit args (no shell). Safe from injection.
 fn run_cmd(cmd: &str, args: &[&str]) -> Result<String, String> {
     let output = Command::new(cmd)
         .args(args)
@@ -26,12 +29,67 @@ fn run_cmd(cmd: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
+/// Run a command and pipe data to its stdin (no shell). Safe for pbcopy, osascript, etc.
+fn run_cmd_with_stdin(cmd: &str, args: &[&str], input: &str) -> Result<String, String> {
+    let mut child = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn {cmd}: {e}"))?;
+    if let Some(ref mut stdin) = child.stdin {
+        stdin
+            .write_all(input.as_bytes())
+            .map_err(|e| format!("Failed to write stdin: {e}"))?;
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Failed to wait for {cmd}: {e}"))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("{cmd} failed: {stderr}"))
+    }
+}
+
 fn run_osascript(script: &str) -> Result<String, String> {
     run_cmd("osascript", &["-e", script])
 }
 
+/// Run an AppleScript by piping it via stdin to osascript (avoids shell escaping issues).
+fn run_osascript_stdin(script: &str) -> Result<String, String> {
+    run_cmd_with_stdin("osascript", &["-"], script)
+}
+
 fn open_url(url: &str) -> Result<String, String> {
+    // Validate URL scheme to prevent opening arbitrary protocols
+    if !url.starts_with("raycast://") && !url.starts_with("https://") {
+        return Err(format!("Invalid URL scheme. Only raycast:// and https:// are allowed. Got: {url}"));
+    }
     run_cmd("open", &[url])
+}
+
+/// Escape a string for safe inclusion in AppleScript double-quoted string literals.
+fn escape_applescript(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Validate that a string input is within acceptable length.
+fn validate_str<'a>(value: Option<&'a str>, label: &str, max_len: usize) -> Result<&'a str, String> {
+    match value {
+        None => Err(format!("{label} is required")),
+        Some(s) if s.len() > max_len => Err(format!("{label} exceeds max length of {max_len}")),
+        Some(s) => Ok(s),
+    }
+}
+
+/// Check if a string matches a safe identifier pattern (alphanumeric, hyphens, underscores, slashes, dots).
+fn is_safe_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'/' || b == b'.')
 }
 
 fn tool_definitions() -> Value {
@@ -153,21 +211,22 @@ fn tool_definitions() -> Value {
 fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
     match name {
         "raycast_search" => {
-            let query = args["query"].as_str().ok_or("query required")?;
+            let query = validate_str(args["query"].as_str(), "query", 512)?;
             let execute = args["execute"].as_bool().unwrap_or(false);
             let encoded = urlenc(query);
             let url = format!("raycast://script-commands/search?query={encoded}");
             open_url(&url)?;
+            // Escape user input for safe AppleScript embedding, pipe via stdin
+            let safe_query = escape_applescript(query);
             let script = format!(
-                "tell application \"Raycast\" to activate\ndelay 0.5\ntell application \"System Events\" to keystroke \"{}\"{}",
-                query.replace('"', "\\\""),
+                "tell application \"Raycast\" to activate\ndelay 0.5\ntell application \"System Events\" to keystroke \"{safe_query}\"{}",
                 if execute {
                     "\ndelay 0.5\ntell application \"System Events\" to key code 36"
                 } else {
                     ""
                 }
             );
-            let _ = run_osascript(&script);
+            let _ = run_osascript_stdin(&script);
             Ok(json!({"action": "search", "query": query, "executed": execute}))
         }
         "raycast_open" => {
@@ -176,6 +235,9 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             let cmd_args = args["args"].as_str();
 
             if let Some(cmd) = command {
+                if cmd.len() > 128 {
+                    return Err("command exceeds max length".to_string());
+                }
                 let mapped = match cmd {
                     "clipboard-history" => "extensions/raycast/clipboard-history/clipboard-history",
                     "emoji" => "extensions/raycast/emoji-symbols/emoji-symbols",
@@ -186,6 +248,10 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
                     "notes" => "extensions/raycast/apple-notes/search-notes",
                     "safari-bookmarks" => "extensions/raycast/safari/search-bookmarks",
                     other => {
+                        // Validate unmapped commands to prevent URL injection
+                        if !is_safe_id(other) {
+                            return Err(format!("Invalid command format: {other}"));
+                        }
                         return {
                             let url = format!("raycast://extensions/{other}");
                             open_url(&url)?;
@@ -195,11 +261,17 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
                 };
                 let mut url = format!("raycast://{mapped}");
                 if let Some(a) = cmd_args {
+                    if a.len() > 512 {
+                        return Err("args exceeds max length".to_string());
+                    }
                     url.push_str(&format!("?arguments={}", urlenc(a)));
                 }
                 open_url(&url)?;
                 Ok(json!({"action": "open", "command": cmd}))
             } else if let Some(ext) = extension {
+                if ext.len() > 128 || !is_safe_id(ext) {
+                    return Err(format!("Invalid extension format: {ext}"));
+                }
                 let url = format!("raycast://extensions/{ext}");
                 open_url(&url)?;
                 Ok(json!({"action": "open", "extension": ext}))
@@ -209,38 +281,31 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             }
         }
         "raycast_clipboard" => {
-            let action = args["action"].as_str().ok_or("action required")?;
+            let action = validate_str(args["action"].as_str(), "action", 32)?;
             match action {
                 "show" => {
                     open_url("raycast://extensions/raycast/clipboard-history/clipboard-history")?;
                 }
                 "clear" => {
+                    // Static script — no user input, safe to pass via stdin
                     let script = "tell application \"Raycast\" to activate\ntell application \"System Events\"\nkeystroke \",\" using command down\ndelay 1\nkeystroke \"clipboard\"\ndelay 0.5\nkey code 36\ndelay 0.5\nkeystroke \"Clear History\"\ndelay 0.5\nkey code 36\nend tell";
-                    run_osascript(script)?;
+                    run_osascript_stdin(script)?;
                 }
                 "copy" => {
-                    let text = args["text"].as_str().ok_or("text required for copy")?;
-                    run_cmd("pbcopy", &[]).map_err(|_| "pbcopy failed".to_string())?;
-                    // Use a pipe approach
-                    let output = Command::new("sh")
-                        .args([
-                            "-c",
-                            &format!("printf '%s' '{}' | pbcopy", text.replace('\'', "'\\''")),
-                        ])
-                        .output()
-                        .map_err(|e| format!("copy failed: {e}"))?;
-                    if !output.status.success() {
-                        return Err("pbcopy failed".to_string());
-                    }
+                    let text = validate_str(args["text"].as_str(), "text", 100000)?;
+                    // Pipe text directly to pbcopy via stdin — no shell, no injection
+                    run_cmd_with_stdin("pbcopy", &[], text)?;
                 }
                 "paste" => {
                     if let Some(idx) = args["index"].as_u64() {
+                        // Clamp index to prevent abuse
+                        let safe_idx = idx.min(100);
                         open_url(
                             "raycast://extensions/raycast/clipboard-history/clipboard-history",
                         )?;
                         let script = format!(
                             "tell application \"System Events\" to key code 125 repeat {} times",
-                            idx
+                            safe_idx
                         );
                         run_osascript(&script)?;
                         run_osascript("tell application \"System Events\" to key code 36")?;
@@ -259,11 +324,20 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             let custom_key = args["custom_key"].as_str();
 
             if let Some(key) = custom_key {
+                if key.len() > 64 {
+                    return Err("custom_key exceeds max length".to_string());
+                }
                 let parts: Vec<&str> = key.split('+').map(|s| s.trim()).collect();
                 let mods = ["cmd", "shift", "alt", "ctrl"];
                 let modifiers: Vec<&str> =
                     parts.iter().filter(|k| mods.contains(k)).copied().collect();
                 let key_char = parts.iter().find(|k| !mods.contains(k)).unwrap_or(&"");
+
+                // Validate key_char is a single alphanumeric character
+                if key_char.len() != 1 || !key_char.bytes().next().is_some_and(|b| b.is_ascii_alphanumeric()) {
+                    return Err(format!("Invalid key: \"{key_char}\". Must be a single alphanumeric character."));
+                }
+
                 let mut mod_str = String::new();
                 for m in &modifiers {
                     if !mod_str.is_empty() {
@@ -302,7 +376,7 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             }
         }
         "raycast_window" => {
-            let action = args["action"].as_str().ok_or("action required")?;
+            let action = validate_str(args["action"].as_str(), "action", 32)?;
             let script = match action {
                 "show" | "focus" => "tell application \"Raycast\" to activate",
                 "hide" => "tell application \"Raycast\" to set visible to false",
@@ -315,44 +389,62 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             Ok(json!({"action": action}))
         }
         "raycast_system" => {
-            let func = args["function"].as_str().ok_or("function required")?;
+            let func = validate_str(args["function"].as_str(), "function", 32)?;
             let confirm = args["confirm"].as_bool().unwrap_or(true);
 
+            // Whitelist of allowed system functions
+            let allowed_functions = ["sleep", "restart", "shutdown", "lock", "logout", "empty-trash", "eject-all"];
+            if !allowed_functions.contains(&func) {
+                return Err(format!("Unknown system function: {func}"));
+            }
+
             if confirm && matches!(func, "restart" | "shutdown" | "logout" | "empty-trash") {
+                let safe_func = escape_applescript(func);
                 let script = format!(
-                    "tell application \"System Events\"\ndisplay dialog \"Are you sure you want to {func}?\" buttons {{\"Cancel\", \"OK\"}} default button \"Cancel\"\nif button returned of result is \"OK\" then\nreturn \"confirmed\"\nelse\nreturn \"cancelled\"\nend if\nend tell"
+                    "tell application \"System Events\"\ndisplay dialog \"Are you sure you want to {safe_func}?\" buttons {{\"Cancel\", \"OK\"}} default button \"Cancel\"\nif button returned of result is \"OK\" then\nreturn \"confirmed\"\nelse\nreturn \"cancelled\"\nend if\nend tell"
                 );
-                let result = run_osascript(&script)?;
+                let result = run_osascript_stdin(&script)?;
                 if !result.trim().contains("confirmed") {
                     return Ok(json!({"action": func, "status": "cancelled"}));
                 }
             }
 
-            let cmd = match func {
-                "sleep" => "pmset sleepnow",
+            // Execute system commands using direct Command::new (no shell)
+            match func {
+                "sleep" => { run_cmd("pmset", &["sleepnow"])?; }
                 "lock" => {
-                    "/System/Library/CoreServices/Menu\\ Extras/User.menu/Contents/Resources/CGSession -suspend"
+                    run_cmd(
+                        "/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession",
+                        &["-suspend"],
+                    )?;
                 }
-                "logout" => "osascript -e 'tell application \"System Events\" to log out'",
-                "empty-trash" => "osascript -e 'tell application \"Finder\" to empty the trash'",
-                "eject-all" => "osascript -e 'tell application \"Finder\" to eject the disks'",
-                "restart" => "sudo shutdown -r now",
-                "shutdown" => "sudo shutdown -h now",
+                "logout" => {
+                    run_cmd("osascript", &["-e", "tell application \"System Events\" to log out"])?;
+                }
+                "empty-trash" => {
+                    run_cmd("osascript", &["-e", "tell application \"Finder\" to empty the trash"])?;
+                }
+                "eject-all" => {
+                    run_cmd("osascript", &["-e", "tell application \"Finder\" to eject the disks"])?;
+                }
+                "restart" => { run_cmd("sudo", &["shutdown", "-r", "now"])?; }
+                "shutdown" => { run_cmd("sudo", &["shutdown", "-h", "now"])?; }
                 _ => return Err(format!("Unknown system function: {func}")),
-            };
-            let output = Command::new("sh")
-                .args(["-c", cmd])
-                .output()
-                .map_err(|e| format!("{e}"))?;
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(format!("System command failed: {stderr}"));
             }
             Ok(json!({"action": func, "status": "executed"}))
         }
         "raycast_auth" => {
-            let action = args["action"].as_str().ok_or("action required")?;
+            let action = validate_str(args["action"].as_str(), "action", 32)?;
             let service = args["service"].as_str();
+
+            // Validate service against allowed list
+            let allowed_services = ["raycast", "github", "notion", "figma", "slack", "linear", "jira"];
+            if let Some(svc) = service
+                && !allowed_services.contains(&svc)
+            {
+                return Err(format!("Unknown service: {svc}"));
+            }
+
             match action {
                 "setup" => {
                     let svc = service.ok_or("service required for setup")?;
@@ -419,7 +511,7 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             }
         }
         "raycast_extensions" => {
-            let action = args["action"].as_str().ok_or("action required")?;
+            let action = validate_str(args["action"].as_str(), "action", 32)?;
             match action {
                 "list" => {
                     let result = run_cmd("defaults", &["read", "com.raycast.macos", "extensions"])
@@ -427,16 +519,17 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
                     Ok(json!({"extensions": result.trim()}))
                 }
                 "search" => {
-                    let query = args["query"].as_str().ok_or("query required")?;
+                    let query = validate_str(args["query"].as_str(), "query", 256)?;
                     let url = format!("raycast://extensions/store?search={}", urlenc(query));
                     open_url(&url)?;
                     Ok(json!({"action": "search", "query": query}))
                 }
                 "install" => {
-                    let ext_id = args["extension_id"]
-                        .as_str()
-                        .ok_or("extension_id required")?;
-                    let url = format!("raycast://extensions/store/{ext_id}");
+                    let ext_id = validate_str(args["extension_id"].as_str(), "extension_id", 128)?;
+                    if !is_safe_id(ext_id) {
+                        return Err("Invalid extension ID format. Only alphanumeric, hyphens, underscores, slashes, and dots are allowed.".to_string());
+                    }
+                    let url = format!("raycast://extensions/store/{}", urlenc(ext_id));
                     open_url(&url)?;
                     Ok(json!({"action": "install", "extension_id": ext_id}))
                 }
@@ -448,11 +541,14 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
             }
         }
         "raycast_workflows" => {
-            let action = args["action"].as_str().ok_or("action required")?;
+            let action = validate_str(args["action"].as_str(), "action", 32)?;
             match action {
                 "create" => {
-                    let wf_name = args["name"].as_str().ok_or("name required")?;
+                    let wf_name = validate_str(args["name"].as_str(), "name", 128)?;
                     let trigger = args["trigger"].as_str().unwrap_or("manual");
+                    if trigger.len() > 32 {
+                        return Err("trigger exceeds max length".to_string());
+                    }
                     Ok(
                         json!({"action": "create", "name": wf_name, "trigger": trigger, "info": "Workflow created (in-memory)"}),
                     )
@@ -461,7 +557,7 @@ fn call_tool(name: &str, args: &Value) -> Result<Value, String> {
                     json!({"workflows": ["system-sleep", "empty-trash", "github-status"], "info": "Predefined workflows available"}),
                 ),
                 "execute" => {
-                    let wf_name = args["name"].as_str().ok_or("name required")?;
+                    let wf_name = validate_str(args["name"].as_str(), "name", 128)?;
                     match wf_name {
                         "system-sleep" => {
                             run_cmd("pmset", &["sleepnow"])?;
