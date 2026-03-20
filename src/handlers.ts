@@ -1,9 +1,57 @@
 import { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { executeRaycastCommand, openRaycast, triggerRaycastURL } from './tools.js';
-import { exec } from 'child_process';
+import { exec, execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+/**
+ * Run a command with stdin input safely (no shell interpolation).
+ * Used for passing AppleScript via stdin to osascript.
+ */
+function spawnWithInput(cmd: string, args: string[], input: string, timeout = 15000): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { timeout });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+    child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+    child.on('error', reject);
+    child.on('close', (code: number | null) => {
+      if (code !== 0) {
+        reject(new Error(stderr || `Process exited with code ${code}`));
+      } else {
+        resolve({ stdout, stderr });
+      }
+    });
+    child.stdin.write(input);
+    child.stdin.end();
+  });
+}
+
+/**
+ * Escape a string for safe inclusion in AppleScript string literals.
+ * Prevents injection via quotes and backslashes.
+ */
+function escapeAppleScript(str: string): string {
+  return String(str)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"');
+}
+
+/**
+ * Validate and constrain string input length.
+ */
+function validateStringInput(value: unknown, label: string, maxLen = 1024): string {
+  if (typeof value !== 'string') {
+    throw new Error(`${label} must be a string`);
+  }
+  if (value.length > maxLen) {
+    throw new Error(`${label} exceeds max length of ${maxLen}`);
+  }
+  return value;
+}
 
 export async function handleToolCall(request: CallToolRequest): Promise<CallToolResult> {
   try {
@@ -41,37 +89,40 @@ export async function handleToolCall(request: CallToolRequest): Promise<CallTool
 }
 
 async function handleRaycastSearch(args: any): Promise<CallToolResult> {
-  const { query, execute = false } = args;
-  
+  const query = validateStringInput(args.query, 'query', 512);
+  const execute = !!args.execute;
+
   try {
     // Open Raycast with search query
     const raycastURL = `raycast://script-commands/search?query=${encodeURIComponent(query)}`;
     await triggerRaycastURL(raycastURL);
-    
-    // Alternative: Use AppleScript to interact with Raycast
+
+    // Use AppleScript to interact with Raycast — escape user input to prevent injection
+    const safeQuery = escapeAppleScript(query);
     const appleScript = `
       tell application "Raycast"
         activate
         delay 0.5
       end tell
-      
+
       tell application "System Events"
-        keystroke "${query}"
+        keystroke "${safeQuery}"
         ${execute ? 'delay 0.5\nkey code 36' : ''}
       end tell
     `;
-    
-    await execAsync(`osascript -e '${appleScript}'`);
-    
+
+    // Pass AppleScript via stdin to avoid shell escaping issues
+    await spawnWithInput('osascript', ['-'], appleScript, 10000);
+
     return {
       content: [{
         type: 'text',
-        text: `🔍 Raycast Search: "${query}"${execute ? ' (executed first result)' : ''}\n\n✅ Raycast opened with search query`
+        text: `Raycast Search: "${query}"${execute ? ' (executed first result)' : ''}\n\nRaycast opened with search query`
       }]
     };
   } catch (error: any) {
     return {
-      content: [{ type: 'text', text: `❌ Raycast search failed: ${error.message}` }],
+      content: [{ type: 'text', text: `Raycast search failed: ${error.message}` }],
       isError: true
     };
   }
@@ -128,16 +179,16 @@ async function handleRaycastOpen(args: any): Promise<CallToolResult> {
 }
 
 async function handleRaycastClipboard(args: any): Promise<CallToolResult> {
-  const { action, text, index } = args;
-  
+  const action = validateStringInput(args.action, 'action', 32);
+
   try {
     switch (action) {
       case 'show':
         await triggerRaycastURL('raycast://extensions/raycast/clipboard-history/clipboard-history');
         break;
-        
-      case 'clear':
-        // Use AppleScript to clear clipboard history
+
+      case 'clear': {
+        // Use AppleScript via stdin — no shell interpolation
         const clearScript = `
           tell application "Raycast"
             activate
@@ -154,65 +205,83 @@ async function handleRaycastClipboard(args: any): Promise<CallToolResult> {
             key code 36
           end tell
         `;
-        await execAsync(`osascript -e '${clearScript}'`);
+        await spawnWithInput('osascript', ['-'], clearScript, 15000);
         break;
-        
-      case 'copy':
-        if (!text) {
+      }
+
+      case 'copy': {
+        const copyText = validateStringInput(args.text, 'text', 100000);
+        if (!copyText) {
           return {
-            content: [{ type: 'text', text: '❌ Text is required for copy action' }],
+            content: [{ type: 'text', text: 'Text is required for copy action' }],
             isError: true
           };
         }
-        await execAsync(`echo "${text}" | pbcopy`);
+        // Use execFile with pbcopy via stdin — no shell interpolation
+        await spawnWithInput('pbcopy', [], copyText, 5000);
         break;
-        
-      case 'paste':
+      }
+
+      case 'paste': {
+        const index = args.index;
         if (index !== undefined) {
-          // Open clipboard history and select item
+          const safeIndex = Math.min(Math.max(0, parseInt(String(index), 10) || 0), 100);
           await triggerRaycastURL('raycast://extensions/raycast/clipboard-history/clipboard-history');
-          await execAsync(`osascript -e 'tell application "System Events" to key code 125 repeat ${index} times'`);
-          await execAsync(`osascript -e 'tell application "System Events" to key code 36'`);
+          const pasteScript = `tell application "System Events" to key code 125 repeat ${safeIndex} times`;
+          await execFileAsync('osascript', ['-e', pasteScript], { timeout: 10000 });
+          await execFileAsync('osascript', ['-e', 'tell application "System Events" to key code 36'], { timeout: 5000 });
         } else {
-          await execAsync(`osascript -e 'tell application "System Events" to keystroke "v" using command down'`);
+          await execFileAsync('osascript', ['-e', 'tell application "System Events" to keystroke "v" using command down'], { timeout: 5000 });
         }
         break;
+      }
     }
-    
+
     return {
       content: [{
         type: 'text',
-        text: `📋 Clipboard ${action.toUpperCase()}${text ? `: "${text}"` : ''}${index !== undefined ? ` (item ${index})` : ''}\n\n✅ Action completed successfully`
+        text: `Clipboard ${action.toUpperCase()}${args.text ? `: "${String(args.text).substring(0, 100)}"` : ''}${args.index !== undefined ? ` (item ${args.index})` : ''}\n\nAction completed successfully`
       }]
     };
   } catch (error: any) {
     return {
-      content: [{ type: 'text', text: `❌ Clipboard action failed: ${error.message}` }],
+      content: [{ type: 'text', text: `Clipboard action failed: ${error.message}` }],
       isError: true
     };
   }
 }
 
 async function handleRaycastShortcut(args: any): Promise<CallToolResult> {
-  const { shortcut, custom_key } = args;
-  
+  const shortcut = args.shortcut ? validateStringInput(args.shortcut, 'shortcut', 64) : undefined;
+  const custom_key = args.custom_key ? validateStringInput(args.custom_key, 'custom_key', 64) : undefined;
+
   try {
     if (custom_key) {
       // Parse and execute custom keyboard shortcut
+      const allowedModifiers = ['cmd', 'shift', 'alt', 'ctrl'];
+      const allowedKeys = /^[a-z0-9]$/;
       const keys = custom_key.toLowerCase().split('+').map((k: string) => k.trim());
-      const modifiers = keys.filter((k: string) => ['cmd', 'shift', 'alt', 'ctrl'].includes(k));
-      const key = keys.find((k: string) => !['cmd', 'shift', 'alt', 'ctrl'].includes(k));
-      
+      const modifiers = keys.filter((k: string) => allowedModifiers.includes(k));
+      const key = keys.find((k: string) => !allowedModifiers.includes(k));
+
+      // Validate the key is a single alphanumeric character
+      if (!key || !allowedKeys.test(key)) {
+        return {
+          content: [{ type: 'text', text: `Invalid key: "${key}". Must be a single alphanumeric character.` }],
+          isError: true
+        };
+      }
+
       let modifierString = '';
       if (modifiers.includes('cmd')) modifierString += 'command down, ';
       if (modifiers.includes('shift')) modifierString += 'shift down, ';
       if (modifiers.includes('alt')) modifierString += 'option down, ';
       if (modifiers.includes('ctrl')) modifierString += 'control down, ';
-      
+
       modifierString = modifierString.slice(0, -2); // Remove trailing comma
-      
+
       const shortcutScript = `tell application "System Events" to keystroke "${key}" using {${modifierString}}`;
-      await execAsync(`osascript -e '${shortcutScript}'`);
+      await execFileAsync('osascript', ['-e', shortcutScript], { timeout: 5000 });
     } else if (shortcut) {
       // Predefined shortcuts
       const shortcuts: { [key: string]: string } = {
@@ -280,7 +349,7 @@ async function handleRaycastWindow(args: any): Promise<CallToolResult> {
       }
     })();
     
-    await execAsync(`osascript -e '${windowScript}'`);
+    await spawnWithInput('osascript', ['-'], windowScript);
     
     return {
       content: [{
@@ -297,32 +366,25 @@ async function handleRaycastWindow(args: any): Promise<CallToolResult> {
 }
 
 async function handleRaycastSystem(args: any): Promise<CallToolResult> {
-  const { function: func, confirm = true } = args;
-  
-  try {
-    const systemCommands: { [key: string]: string } = {
-      'sleep': 'pmset sleepnow',
-      'restart': 'sudo shutdown -r now',
-      'shutdown': 'sudo shutdown -h now',
-      'lock': '/System/Library/CoreServices/Menu\\ Extras/User.menu/Contents/Resources/CGSession -suspend',
-      'logout': 'osascript -e "tell application \\"System Events\\" to log out"',
-      'empty-trash': 'osascript -e "tell application \\"Finder\\" to empty the trash"',
-      'eject-all': 'osascript -e "tell application \\"Finder\\" to eject the disks"'
+  const func = validateStringInput(args.function, 'function', 32);
+  const confirmFlag = args.confirm !== false;
+
+  // Whitelist of allowed system functions — no user input reaches the shell
+  const allowedFunctions = ['sleep', 'restart', 'shutdown', 'lock', 'logout', 'empty-trash', 'eject-all'];
+  if (!allowedFunctions.includes(func)) {
+    return {
+      content: [{ type: 'text', text: `Unknown system function: ${func}` }],
+      isError: true
     };
-    
-    const command = systemCommands[func];
-    if (!command) {
-      return {
-        content: [{ type: 'text', text: `❌ Unknown system function: ${func}` }],
-        isError: true
-      };
-    }
-    
+  }
+
+  try {
     // Show confirmation for destructive actions
-    if (confirm && ['restart', 'shutdown', 'logout', 'empty-trash'].includes(func)) {
+    if (confirmFlag && ['restart', 'shutdown', 'logout', 'empty-trash'].includes(func)) {
+      const safeFunc = escapeAppleScript(func);
       const confirmScript = `
         tell application "System Events"
-          display dialog "Are you sure you want to ${func}?" buttons {"Cancel", "OK"} default button "Cancel"
+          display dialog "Are you sure you want to ${safeFunc}?" buttons {"Cancel", "OK"} default button "Cancel"
           if button returned of result is "OK" then
             return "confirmed"
           else
@@ -330,27 +392,49 @@ async function handleRaycastSystem(args: any): Promise<CallToolResult> {
           end if
         end tell
       `;
-      
-      const confirmResult = await execAsync(`osascript -e '${confirmScript}'`);
-      if (confirmResult.stdout.trim() !== 'confirmed') {
+
+      const confirmResult = await spawnWithInput('osascript', ['-'], confirmScript, 30000);
+      if (String(confirmResult.stdout).trim() !== 'confirmed') {
         return {
-          content: [{ type: 'text', text: `❌ System ${func} cancelled by user` }]
+          content: [{ type: 'text', text: `System ${func} cancelled by user` }]
         };
       }
     }
-    
-    // Execute the system command
-    await execAsync(command);
-    
+
+    // Execute system commands using execFile (no shell) where possible
+    switch (func) {
+      case 'sleep':
+        await execFileAsync('pmset', ['sleepnow'], { timeout: 5000 });
+        break;
+      case 'restart':
+        await execFileAsync('sudo', ['shutdown', '-r', 'now'], { timeout: 5000 });
+        break;
+      case 'shutdown':
+        await execFileAsync('sudo', ['shutdown', '-h', 'now'], { timeout: 5000 });
+        break;
+      case 'lock':
+        await execFileAsync('/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession', ['-suspend'], { timeout: 5000 });
+        break;
+      case 'logout':
+        await execFileAsync('osascript', ['-e', 'tell application "System Events" to log out'], { timeout: 5000 });
+        break;
+      case 'empty-trash':
+        await execFileAsync('osascript', ['-e', 'tell application "Finder" to empty the trash'], { timeout: 10000 });
+        break;
+      case 'eject-all':
+        await execFileAsync('osascript', ['-e', 'tell application "Finder" to eject the disks'], { timeout: 10000 });
+        break;
+    }
+
     return {
       content: [{
         type: 'text',
-        text: `🔧 System ${func.toUpperCase()}\n\n✅ System function executed successfully`
+        text: `System ${func.toUpperCase()}\n\nSystem function executed successfully`
       }]
     };
   } catch (error: any) {
     return {
-      content: [{ type: 'text', text: `❌ System function failed: ${error.message}` }],
+      content: [{ type: 'text', text: `System function failed: ${error.message}` }],
       isError: true
     };
   }
