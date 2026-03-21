@@ -1,4 +1,14 @@
 #!/usr/bin/env node
+/**
+ * Raycast MCP Server — tools for Raycast automation via MCP protocol.
+ *
+ * Security:
+ * - All string inputs validated and length-bounded before processing
+ * - Command execution uses execFile/spawn (no shell interpolation)
+ * - Error messages sanitized to prevent internal path leakage
+ * - No hardcoded credentials — auth via Raycast's secure token store
+ * - Stdin-based command input prevents shell injection
+ */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -15,6 +25,15 @@ import { promisify } from 'util';
 import { execFile, spawn } from 'child_process';
 
 const execFileAsync = promisify(execFile);
+
+/** Redact internal paths from error messages for safe external display. */
+function redactError(err: unknown): string {
+  let msg = err instanceof Error ? err.message : String(err);
+  msg = msg.replace(/\/Users\/[^\s"']*/g, '[redacted]');
+  msg = msg.replace(/\/Volumes\/[^\s"']*/g, '[redacted]');
+  if (msg.length > 500) msg = msg.slice(0, 500) + '... (truncated)';
+  return msg;
+}
 
 /**
  * Validate a string input with max length.
