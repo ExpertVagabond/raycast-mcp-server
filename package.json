@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "@psm/mcp-core-ts": "file:../psm-mcp-core-ts",
     "zod": "^4.3.6"
   },
   "devDependencies": {
