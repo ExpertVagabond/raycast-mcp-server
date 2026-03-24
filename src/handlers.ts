@@ -1,5 +1,6 @@
 import { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { executeRaycastCommand, openRaycast, triggerRaycastURL } from './tools.js';
+import { sanitizeError } from '@psm/mcp-core-ts';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 
@@ -75,13 +76,13 @@ export async function handleToolCall(request: CallToolRequest): Promise<CallTool
       
       default:
         return {
-          content: [{ type: 'text', text: `Unknown tool: ${request.params.name}` }],
+          content: [{ type: 'text' as const, text: `Unknown tool: ${request.params.name}` }],
           isError: true
         };
     }
   } catch (error: any) {
     return {
-      content: [{ type: 'text', text: `Error executing ${request.params.name}: ${error.message}` }],
+      content: [{ type: 'text' as const, text: `Error executing ${request.params.name}: ${sanitizeError(error.message)}` }],
       isError: true
     };
   }
@@ -121,7 +122,7 @@ async function handleRaycastSearch(args: any): Promise<CallToolResult> {
     };
   } catch (error: any) {
     return {
-      content: [{ type: 'text', text: `Raycast search failed: ${error.message}` }],
+      content: [{ type: 'text', text: `Raycast search failed: ${sanitizeError(error.message)}` }],
       isError: true
     };
   }
@@ -193,7 +194,7 @@ async function handleRaycastOpen(args: any): Promise<CallToolResult> {
     };
   } catch (error: any) {
     return {
-      content: [{ type: 'text', text: `❌ Raycast command failed: ${error.message}` }],
+      content: [{ type: 'text', text: `Raycast command failed: ${sanitizeError(error.message)}` }],
       isError: true
     };
   }
@@ -266,7 +267,7 @@ async function handleRaycastClipboard(args: any): Promise<CallToolResult> {
     };
   } catch (error: any) {
     return {
-      content: [{ type: 'text', text: `Clipboard action failed: ${error.message}` }],
+      content: [{ type: 'text', text: `Clipboard action failed: ${sanitizeError(error.message)}` }],
       isError: true
     };
   }
@@ -333,7 +334,7 @@ async function handleRaycastShortcut(args: any): Promise<CallToolResult> {
     };
   } catch (error: any) {
     return {
-      content: [{ type: 'text', text: `❌ Shortcut execution failed: ${error.message}` }],
+      content: [{ type: 'text', text: `Shortcut execution failed: ${sanitizeError(error.message)}` }],
       isError: true
     };
   }
@@ -380,7 +381,7 @@ async function handleRaycastWindow(args: any): Promise<CallToolResult> {
     };
   } catch (error: any) {
     return {
-      content: [{ type: 'text', text: `❌ Window action failed: ${error.message}` }],
+      content: [{ type: 'text', text: `Window action failed: ${sanitizeError(error.message)}` }],
       isError: true
     };
   }
@@ -455,7 +456,7 @@ async function handleRaycastSystem(args: any): Promise<CallToolResult> {
     };
   } catch (error: any) {
     return {
-      content: [{ type: 'text', text: `System function failed: ${error.message}` }],
+      content: [{ type: 'text', text: `System function failed: ${sanitizeError(error.message)}` }],
       isError: true
     };
   }

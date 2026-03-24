@@ -21,19 +21,11 @@ import {
 import { tools } from './tools.js';
 import { handleToolCall } from './handlers.js';
 import { raycastAuth, AuthConfig } from './auth.js';
+import { sanitizeError } from '@psm/mcp-core-ts';
 import { promisify } from 'util';
 import { execFile, spawn } from 'child_process';
 
 const execFileAsync = promisify(execFile);
-
-/** Redact internal paths from error messages for safe external display. */
-function redactError(err: unknown): string {
-  let msg = err instanceof Error ? err.message : String(err);
-  msg = msg.replace(/\/Users\/[^\s"']*/g, '[redacted]');
-  msg = msg.replace(/\/Volumes\/[^\s"']*/g, '[redacted]');
-  if (msg.length > 500) msg = msg.slice(0, 500) + '... (truncated)';
-  return msg;
-}
 
 /**
  * Validate a string input with max length.
@@ -283,7 +275,7 @@ class RaycastMCPServer {
       }
     } catch (error: any) {
       return {
-        content: [{ type: 'text', text: `❌ Auth action failed: ${error.message}` }],
+        content: [{ type: 'text', text: `Auth action failed: ${sanitizeError(error.message)}` }],
         isError: true
       };
     }
@@ -424,7 +416,7 @@ class RaycastMCPServer {
             return {
               content: [{
                 type: 'text',
-                text: `Extension validation failed: ${error.message}\n\nEnsure the path contains a valid Raycast extension with package.json`
+                text: `Extension validation failed: ${sanitizeError(error.message)}\n\nEnsure the path contains a valid Raycast extension with package.json`
               }],
               isError: true
             };
@@ -449,7 +441,7 @@ class RaycastMCPServer {
       }
     } catch (error: any) {
       return {
-        content: [{ type: 'text', text: `Extension action failed: ${error.message}` }],
+        content: [{ type: 'text', text: `Extension action failed: ${sanitizeError(error.message)}` }],
         isError: true
       };
     }
@@ -581,7 +573,7 @@ class RaycastMCPServer {
       }
     } catch (error: any) {
       return {
-        content: [{ type: 'text', text: `Workflow action failed: ${error.message}` }],
+        content: [{ type: 'text', text: `Workflow action failed: ${sanitizeError(error.message)}` }],
         isError: true
       };
     }
