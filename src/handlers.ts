@@ -1,6 +1,6 @@
 import { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { executeRaycastCommand, openRaycast, triggerRaycastURL } from './tools.js';
-import { sanitizeError } from '@psm/mcp-core-ts';
+import { sanitizeError } from './psm-mcp-core.js';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 
