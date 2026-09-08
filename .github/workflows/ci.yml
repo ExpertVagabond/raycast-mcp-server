@@ -40,16 +40,27 @@ jobs:
 
   security:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
     - uses: actions/checkout@v7
-    
+
     - name: Run security audit
       run: npm audit --audit-level moderate
-    
+
+    # analyze cannot run on its own -- it reads a config that only init writes,
+    # and it failed with "Has the 'init' action been called?" every time it was
+    # reached. It also took a `languages` input, which belongs on init and was
+    # being ignored ("Unexpected input(s) 'languages'"). This was invisible
+    # until the audit step above started passing.
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v4.37.9
+      with:
+        languages: javascript-typescript
+
     - name: Run CodeQL Analysis
       uses: github/codeql-action/analyze@v4.37.9
-      with:
-        languages: javascript
 
   release:
     needs: [ci, security]
@@ -74,10 +85,27 @@ jobs:
     - name: Build
       run: npm run build --if-present
     
+    # semantic-release publishes to npm by default, so with no NPM_TOKEN it
+    # fails on every push to main. Skip the release instead of going red.
+    - name: Check release credentials
+      id: creds
+      env:
+        NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      run: |
+        if [ -n "$NPM_TOKEN" ]; then
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          echo "::warning title=Release skipped::NPM_TOKEN is not set on this repository, so semantic-release cannot publish. Add the secret to re-enable releases."
+        fi
+
+    # semantic_version was pinned to 18; current @semantic-release/* plugins
+    # declare a peer on v22+, so installing extra_plugins failed outright.
     - name: Semantic Release
+      if: steps.creds.outputs.ready == 'true'
       uses: cycjimmy/semantic-release-action@v6
       with:
-        semantic_version: 18
+        semantic_version: 24
         extra_plugins: |
           @semantic-release/changelog
           @semantic-release/git

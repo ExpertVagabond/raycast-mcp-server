@@ -21,7 +21,7 @@ import {
 import { tools } from './tools.js';
 import { handleToolCall } from './handlers.js';
 import { raycastAuth, AuthConfig } from './auth.js';
-import { sanitizeError } from '@psm/mcp-core-ts';
+import { sanitizeError } from './psm-mcp-core.js';
 import { promisify } from 'util';
 import { execFile, spawn } from 'child_process';
 
