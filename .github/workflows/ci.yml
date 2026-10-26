@@ -103,7 +103,7 @@ jobs:
     # declare a peer on v22+, so installing extra_plugins failed outright.
     - name: Semantic Release
       if: steps.creds.outputs.ready == 'true'
-      uses: cycjimmy/semantic-release-action@v6
+      uses: cycjimmy/semantic-release-action@v8
       with:
         semantic_version: 24
         extra_plugins: |
