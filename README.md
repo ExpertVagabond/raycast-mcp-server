@@ -1,28 +1,31 @@
 # Raycast MCP Server
 
-A comprehensive Model Context Protocol (MCP) server for Raycast workflow automation, providing 9 powerful tools to integrate Raycast with AI assistants like Claude.
+A macOS Model Context Protocol (MCP) server that lets AI assistants invoke nine Raycast and local-automation tools. It uses Raycast URLs, AppleScript, and standard macOS commands, so the automation tools require Raycast on macOS.
 
 ## Features
 
-### 🔧 **9 Comprehensive Tools**
+### Nine registered tools
 
-1. **raycast_auth** - Manage Raycast and service authentication
-2. **raycast_extensions** - Manage Raycast extensions and store integration  
-3. **raycast_workflows** - Create and manage Raycast workflows and automations
-4. **raycast_search** - Search and launch applications, files, or commands via Raycast
-5. **raycast_clipboard** - Manage clipboard history via Raycast
-6. **raycast_shortcut** - Trigger Raycast shortcuts and hotkeys
-7. **raycast_window** - Control Raycast window behavior
-8. **raycast_system** - Access system functions through Raycast
-9. **Plus additional workflow tools**
+1. **raycast_search** - Open Raycast, enter a query, and optionally execute the first result
+2. **raycast_open** - Open a Raycast command or extension URL
+3. **raycast_clipboard** - Show, clear, copy, or paste clipboard content
+4. **raycast_shortcut** - Trigger a predefined Raycast URL or validated keyboard shortcut
+5. **raycast_window** - Show, hide, toggle, or focus Raycast
+6. **raycast_system** - Invoke selected macOS system actions
+7. **raycast_auth** - Audit configured environment credentials, print setup instructions, and validate supported credentials
+8. **raycast_extensions** - Drive supported extension-management flows
+9. **raycast_workflows** - Store and execute local workflow definitions
 
 ### 🚀 **Capabilities**
-- Full OAuth integration support for multiple services
-- Extension management and publishing workflow
-- Custom workflow creation and execution
-- System automation and control
-- Clipboard management
-- Search and navigation
+- Uses `execFile` and `spawn` without shell interpolation
+- Validates and length-bounds user-controlled strings
+- Uses allowlisted URL schemes and constrained command identifiers
+- Supports local workflows, clipboard operations, navigation, and system automation
+- Can validate GitHub, Notion, and Figma credentials without returning the credential itself
+
+### Authentication scope
+
+This project is not an OAuth callback server and does not exchange authorization codes. The `raycast_auth oauth` action opens provider authorization URLs, but those templates require you to supply real client IDs and redirect URLs before they are usable. Credential validation is currently implemented for GitHub, Notion, and Figma; other listed services return an explicit “not implemented” result.
 
 ## Installation
 
@@ -45,10 +48,10 @@ Add to your `claude_desktop_config.json`:
 }
 ```
 
-### Via NPX (Coming Soon)
+### Via NPX
 
 ```bash
-npx raycast-mcp-server
+npx raycast-mcp-server@1.0.1
 ```
 
 ### Via Smithery
@@ -61,8 +64,8 @@ smithery install raycast-mcp-server
 
 ### Prerequisites
 - Node.js 18+
-- TypeScript
-- Raycast installed on macOS
+- macOS with Raycast installed for automation calls
+- Accessibility permission for your terminal or MCP host when using AppleScript keyboard control
 
 ### Setup
 
@@ -71,6 +74,7 @@ git clone https://github.com/ExpertVagabond/raycast-mcp-server.git
 cd raycast-mcp-server
 npm install
 npm run build
+npm test
 ```
 
 ### Running Locally
@@ -122,10 +126,11 @@ npm run build
 {"tool": "raycast_workflows", "arguments": {"action": "execute", "name": "morning-routine"}}
 ```
 
-## Environment Variables
+## Environment variables
 
-- `RAYCAST_API_KEY` - Raycast API key (if available)
-- `RAYCAST_TEAM_ID` - Raycast team ID (if applicable)
+- `RAYCAST_API_KEY` and `RAYCAST_TEAM_ID` - optional values reported by the credential audit
+- `GITHUB_TOKEN`, `NOTION_TOKEN`, `FIGMA_TOKEN` - supported credential validation
+- `SLACK_TOKEN`, `LINEAR_TOKEN`, `JIRA_TOKEN` - detected by the audit; remote validation is not implemented
 
 ## Contributing
 

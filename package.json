@@ -14,6 +14,9 @@
   ],
   "scripts": {
     "build": "tsc",
+    "lint": "tsc --noEmit",
+    "type-check": "tsc --noEmit",
+    "test": "npm run build && node test-tool-surface.mjs",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "prepublishOnly": "npm run build"
@@ -33,7 +36,7 @@
     "automation",
     "macos"
   ],
-  "author": "Claude Code",
+  "author": "Matthew Karsten <matthewkarstenconnects@gmail.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
